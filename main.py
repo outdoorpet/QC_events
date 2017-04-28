@@ -24,12 +24,16 @@ Base = declarative_base()
 class Waveforms(Base):
     __tablename__ = 'waveforms'
     # Here we define columns for the table
-    # Notice that each column is also a normal Python instance attribute.
-    starttime = Column(String(12), nullable=False)
+    starttime = Column(Integer)
+    endtime = Column(Integer)
+    orig_network = Column(String(2), nullable=False)
+    new_network = Column(String(2), nullable=False)
     station = Column(String(5), nullable=False)
     component = Column(String(3), nullable=False)
-    full_id = Column(String(21), nullable=False, primary_key=True)
-    path = Column(String(250), nullable=False)
+    location = Column(String(2), nullable=False)
+    waveform_basename = Column(String(40), nullable=False, primary_key=True)
+    path = Column(String(100), nullable=False)
+    ASDF_tag = Column(String(100), nullable=False)
 
 
 class PandasModel(QtCore.QAbstractTableModel):
@@ -250,7 +254,7 @@ class MainWindow(QtGui.QWidget):
         # if not self.stn_filename:
         #     return
 
-        self.stn_filename = '/Users/ashbycooper/Desktop/_GA_ANUtest/XX/network_metadata/stnXML/XX.xml'
+        self.stn_filename = '/Users/ashbycooper/Desktop/_GA_ANUtest/XX/network_metadata/stnXML/X5.xml'
 
         self.inv = read_inventory(self.stn_filename)
         self.plot_inv()
