@@ -197,27 +197,27 @@ class MainWindow(QtGui.QWidget):
         self.SQL_filename = str(QtGui.QFileDialog.getOpenFileName(
             parent=self, caption="Choose File",
             directory=os.path.expanduser("~"),
-            filter="XML Files (*.xml)"))
+            filter="SQLite Files (*.db)"))
         if not self.SQL_filename:
             return
 
         # Open and create the SQL file
         # Create an engine that stores data
-        engine = create_engine('sqlite:////' + self.SQL_filename)
+        self.engine = create_engine('sqlite:////' + self.SQL_filename)
 
         # Initiate a session with the SQL database so that we can add data to it
-        Session = sessionmaker(bind=engine)
-        self.session = Session()
+        self.Session = sessionmaker(bind=self.engine)
+        self.session = self.Session()
 
     def open_cat_file(self):
-        # self.cat_filename = str(QtGui.QFileDialog.getOpenFileName(
-        #     parent=self, caption="Choose File",
-        #     directory=os.path.expanduser("~"),
-        #     filter="XML Files (*.xml)"))
-        # if not self.cat_filename:
-        #     return
+        self.cat_filename = str(QtGui.QFileDialog.getOpenFileName(
+            parent=self, caption="Choose File",
+            directory=os.path.expanduser("~"),
+            filter="XML Files (*.xml)"))
+        if not self.cat_filename:
+            return
 
-        self.cat_filename = '/Users/ashbycooper/Desktop/_GA_ANUtest/XX/event_metadata/earthquake/quakeML/fdsnws-event_2016-10-24T07_06_28.xml'
+        # self.cat_filename = '/Users/ashbycooper/Desktop/_GA_ANUtest/XX/event_metadata/earthquake/quakeML/fdsnws-event_2016-10-24T07_06_28.xml'
 
         self.cat = read_events(self.cat_filename)
 
@@ -248,14 +248,14 @@ class MainWindow(QtGui.QWidget):
         self.plot_events()
 
     def open_xml_file(self):
-        # self.stn_filename = str(QtGui.QFileDialog.getOpenFileName(
-        #     parent=self, caption="Choose File",
-        #     directory=os.path.expanduser("~"),
-        #     filter="XML Files (*.xml)"))
-        # if not self.stn_filename:
-        #     return
+        self.stn_filename = str(QtGui.QFileDialog.getOpenFileName(
+            parent=self, caption="Choose File",
+            directory=os.path.expanduser("~"),
+            filter="XML Files (*.xml)"))
+        if not self.stn_filename:
+            return
 
-        self.stn_filename = '/Users/ashbycooper/Desktop/_GA_ANUtest/XX/network_metadata/stnXML/X5.xml'
+        # self.stn_filename = '/Users/ashbycooper/Desktop/_GA_ANUtest/XX/network_metadata/stnXML/X5.xml'
 
         self.inv = read_inventory(self.stn_filename)
         self.plot_inv()
@@ -403,6 +403,12 @@ class MainWindow(QtGui.QWidget):
             self.view.page().mainFrame().evaluateJavaScript(js_call)
 
     def create_SG2K_initiate(self, event, quake_df):
+
+        # specify output directory for miniSEED files
+        temp_seed_out = os.path.join(os.path.dirname(self.cat_filename), event)
+
+
+
         print(event)
         print(quake_df)
 
@@ -419,7 +425,15 @@ class MainWindow(QtGui.QWidget):
             print(matched_entry.ASDF_tag)
 
             #read in the data to obspy
-            st += read(os.path.join(matched_entry.path, matched_entry.waveform_basename))
+            temp_st = read(os.path.join(matched_entry.path, matched_entry.waveform_basename))
+
+            #modify network header
+            temp_tr = temp_st[0]
+            temp_tr.stats.network = matched_entry.new_network
+
+            print(temp_tr)
+
+            st.append(temp_tr)
 
         if st.__nonzero__():
 
@@ -434,7 +448,8 @@ class MainWindow(QtGui.QWidget):
 
             try:
                 # write traces into temporary directory
-                pass
+                for tr in st:
+                    tr.write(os.path.join(temp_seed_out, tr.id + ".MSEED"), format="MSEED")
             except:
                 print("something went wrong")
 
