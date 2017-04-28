@@ -1,7 +1,8 @@
-from PyQt4 import QtCore, QtGui, QtWebKit, QtNetwork
+from PyQt4 import QtCore, QtGui, QtWebKit, QtNetwork, QtSql
 from obspy import read_inventory, read_events, UTCDateTime, Stream, read
 import functools
 import os
+import shutil
 
 import pandas as pd
 import numpy as np
@@ -157,6 +158,12 @@ class MainWindow(QtGui.QWidget):
 
         main_grid_lay.addWidget(self.station_view, 0, 0, 1, 1)
 
+        # self.SQL_view = QtGui.QTableView()
+        # self.SQL_view.setModel(QtSql.QSqlTableModel)
+        # self.SQL_view.setWindowTitle("Waveforms SQLite")
+        #
+        # main_grid_lay.addWidget(self.SQL_view)
+
         view = self.view = QtWebKit.QWebView()
         cache = QtNetwork.QNetworkDiskCache()
         cache.setCacheDirectory("cache")
@@ -195,11 +202,14 @@ class MainWindow(QtGui.QWidget):
 
     def open_SQL_file(self):
         self.SQL_filename = str(QtGui.QFileDialog.getOpenFileName(
-            parent=self, caption="Choose File",
+            parent=self, caption="Choose SQLite Database File",
             directory=os.path.expanduser("~"),
             filter="SQLite Files (*.db)"))
         if not self.SQL_filename:
             return
+
+        print('')
+        print("Initializing SQLite Database..")
 
         # Open and create the SQL file
         # Create an engine that stores data
@@ -209,15 +219,15 @@ class MainWindow(QtGui.QWidget):
         self.Session = sessionmaker(bind=self.engine)
         self.session = self.Session()
 
+        print("SQLite Initializing Done!")
+
     def open_cat_file(self):
         self.cat_filename = str(QtGui.QFileDialog.getOpenFileName(
-            parent=self, caption="Choose File",
+            parent=self, caption="Choose Earthquake Catalogue QuakeML File",
             directory=os.path.expanduser("~"),
             filter="XML Files (*.xml)"))
         if not self.cat_filename:
             return
-
-        # self.cat_filename = '/Users/ashbycooper/Desktop/_GA_ANUtest/XX/event_metadata/earthquake/quakeML/fdsnws-event_2016-10-24T07_06_28.xml'
 
         self.cat = read_events(self.cat_filename)
 
@@ -249,13 +259,11 @@ class MainWindow(QtGui.QWidget):
 
     def open_xml_file(self):
         self.stn_filename = str(QtGui.QFileDialog.getOpenFileName(
-            parent=self, caption="Choose File",
+            parent=self, caption="Choose StationXML Metadata File",
             directory=os.path.expanduser("~"),
             filter="XML Files (*.xml)"))
         if not self.stn_filename:
             return
-
-        # self.stn_filename = '/Users/ashbycooper/Desktop/_GA_ANUtest/XX/network_metadata/stnXML/X5.xml'
 
         self.inv = read_inventory(self.stn_filename)
         self.plot_inv()
@@ -407,31 +415,33 @@ class MainWindow(QtGui.QWidget):
         # specify output directory for miniSEED files
         temp_seed_out = os.path.join(os.path.dirname(self.cat_filename), event)
 
+        # create directory
+        if os.path.exists(temp_seed_out):
+            shutil.rmtree(temp_seed_out)
+        os.mkdir(temp_seed_out)
 
+        query_time = UTCDateTime(quake_df['qtime'] - (10*60)).timestamp
 
-        print(event)
-        print(quake_df)
-
-        query_time = quake_df['qtime'] - (10*60)
+        # query_time = UTCDateTime(year=2016, month=10, day=9, hour=23, minute=59).timestamp
 
         # Create a Stream object to put data into
         st = Stream()
 
+        print('---------------------------------------')
+        print('Finding Data for Earthquake: '+event)
         for matched_entry in self.session.query(Waveforms). \
                 filter(or_(and_(Waveforms.starttime <= query_time, query_time < Waveforms.endtime),
-                           and_(query_time <= Waveforms.starttime, Waveforms.starttime < query_time + 900)),
+                           and_(query_time <= Waveforms.starttime, Waveforms.starttime < query_time + 20*60)),
                        Waveforms.component == 'EHZ'):
 
             print(matched_entry.ASDF_tag)
 
-            #read in the data to obspy
+            # read in the data to obspy
             temp_st = read(os.path.join(matched_entry.path, matched_entry.waveform_basename))
 
-            #modify network header
+            # modify network header
             temp_tr = temp_st[0]
             temp_tr.stats.network = matched_entry.new_network
-
-            print(temp_tr)
 
             st.append(temp_tr)
 
@@ -440,9 +450,10 @@ class MainWindow(QtGui.QWidget):
             # Attempt to merge all traces with matching ID'S in place
             st.merge()
 
-            # now trim the st object to 5 mins before query time and 15 minutes afterwards
-            trace_starttime = query_time - (5*60)
-            trace_endtime = query_time - (15*60)
+            # now trim the st object to 5 mins
+            # before query time and 15 minutes afterwards
+            trace_starttime = UTCDateTime(query_time - (5*60))
+            trace_endtime = UTCDateTime(query_time + (15*60))
 
             st.trim(starttime=trace_starttime, endtime=trace_endtime, pad=True, fill_value=0)
 
@@ -450,11 +461,13 @@ class MainWindow(QtGui.QWidget):
                 # write traces into temporary directory
                 for tr in st:
                     tr.write(os.path.join(temp_seed_out, tr.id + ".MSEED"), format="MSEED")
+                print("Wrote Temporary MiniSEED data to: " + temp_seed_out)
+                print('')
             except:
-                print("something went wrong")
+                print("Something Went Wrong!")
 
         else:
-            print("No Data for Earthquake")
+            print("No Data for Earthquake!")
 
 
 
