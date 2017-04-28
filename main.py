@@ -3,12 +3,15 @@ from obspy import read_inventory, read_events, UTCDateTime, Stream, read
 import functools
 import os
 import shutil
+import itertools
+import re
 
 import pandas as pd
 import numpy as np
 from query_input_yes_no import query_yes_no
 import sys
 from station_tree_widget import StationTreeWidget
+from select_stacomp_dialog import Ui_SelectDialog
 
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
@@ -36,6 +39,73 @@ class Waveforms(Base):
     waveform_basename = Column(String(40), nullable=False, primary_key=True)
     path = Column(String(100), nullable=False)
     ASDF_tag = Column(String(100), nullable=False)
+
+
+class selectionDialog(QtGui.QDialog):
+    '''
+    Select all functionality is modified from Brendan Abel & dbc from their
+    stackoverflow communication Feb 24th 2016:
+    http://stackoverflow.com/questions/35611199/creating-a-toggling-check-all-checkbox-for-a-listview
+    '''
+    def __init__(self, parent=None, sta_list=None):
+        QtGui.QDialog.__init__(self, parent)
+        self.selui = Ui_SelectDialog()
+        self.selui.setupUi(self)
+
+        # Set all check box to checked
+        self.selui.check_all.setChecked(True)
+        self.selui.check_all.clicked.connect(self.selectAllCheckChanged)
+
+        self.model = QtGui.QStandardItemModel(self.selui.StaListView)
+
+        self.sta_list = sta_list
+        for sta in self.sta_list:
+            item = QtGui.QStandardItem(sta)
+            item.setCheckable(True)
+
+            self.model.appendRow(item)
+
+        self.selui.StaListView.setModel(self.model)
+        self.selui.StaListView.clicked.connect(self.listviewCheckChanged)
+
+    def selectAllCheckChanged(self):
+        ''' updates the listview based on select all checkbox '''
+        model = self.selui.StaListView.model()
+        for index in range(model.rowCount()):
+            item = model.item(index)
+            if item.isCheckable():
+                if self.selui.check_all.isChecked():
+                    item.setCheckState(QtCore.Qt.Checked)
+                else:
+                    item.setCheckState(QtCore.Qt.Unchecked)
+
+    def listviewCheckChanged(self):
+        ''' updates the select all checkbox based on the listview '''
+        model = self.selui.StaListView.model()
+        items = [model.item(index) for index in range(model.rowCount())]
+
+        if all(item.checkState() == QtCore.Qt.Checked for item in items):
+            self.selui.check_all.setTristate(False)
+            self.selui.check_all.setCheckState(QtCore.Qt.Checked)
+        elif any(item.checkState() == QtCore.Qt.Checked for item in items):
+            self.selui.check_all.setTristate(True)
+            self.selui.check_all.setCheckState(QtCore.Qt.PartiallyChecked)
+        else:
+            self.selui.check_all.setTristate(False)
+            self.selui.check_all.setCheckState(QtCore.Qt.Unchecked)
+
+    def getSelected(self):
+        select_stations = []
+        i = 0
+        while self.model.item(i):
+            if self.model.item(i).checkState():
+                select_stations.append(str(self.model.item(i).text()))
+            i += 1
+
+        # Return Selected stations and checked components
+        return(select_stations, [self.selui.zcomp.isChecked(),
+               self.selui.ncomp.isChecked(),
+               self.selui.ecomp.isChecked()])
 
 
 class PandasModel(QtCore.QAbstractTableModel):
@@ -279,8 +349,11 @@ class MainWindow(QtGui.QWidget):
             [self.inv[0].code], type=STATION_VIEW_ITEM_TYPES["NETWORK"])
 
         # Add all children stations.
-        children = []
+        self.station_list = []
+        children = [] #pyqt QtreeWidget items
+
         for i, station in enumerate(self.inv[0]):
+            self.station_list.append(str(station.code))
             children.append(
                 QtGui.QTreeWidgetItem(
                     [station.code], type=STATION_VIEW_ITEM_TYPES["STATION"]))
@@ -412,62 +485,69 @@ class MainWindow(QtGui.QWidget):
 
     def create_SG2K_initiate(self, event, quake_df):
 
-        # specify output directory for miniSEED files
-        temp_seed_out = os.path.join(os.path.dirname(self.cat_filename), event)
+        comp_list = ['__Z', '__N', '__E']
 
-        # create directory
-        if os.path.exists(temp_seed_out):
-            shutil.rmtree(temp_seed_out)
-        os.mkdir(temp_seed_out)
+        # Launch the custom station/component selection dialog
+        sel_dlg = selectionDialog(parent=self, sta_list=self.station_list)
+        if sel_dlg.exec_():
+            select_sta, bool_comp = sel_dlg.getSelected()
+            query_comp = list(itertools.compress(comp_list, bool_comp))
 
-        query_time = UTCDateTime(quake_df['qtime'] - (10*60)).timestamp
+            # specify output directory for miniSEED files
+            temp_seed_out = os.path.join(os.path.dirname(self.cat_filename), event)
 
-        # query_time = UTCDateTime(year=2016, month=10, day=9, hour=23, minute=59).timestamp
+            # create directory
+            if os.path.exists(temp_seed_out):
+                shutil.rmtree(temp_seed_out)
+            os.mkdir(temp_seed_out)
 
-        # Create a Stream object to put data into
-        st = Stream()
+            query_time = UTCDateTime(quake_df['qtime'] - (10*60)).timestamp
 
-        print('---------------------------------------')
-        print('Finding Data for Earthquake: '+event)
-        for matched_entry in self.session.query(Waveforms). \
-                filter(or_(and_(Waveforms.starttime <= query_time, query_time < Waveforms.endtime),
-                           and_(query_time <= Waveforms.starttime, Waveforms.starttime < query_time + 20*60)),
-                       Waveforms.component == 'EHZ'):
+            # Create a Stream object to put data into
+            st = Stream()
 
-            print(matched_entry.ASDF_tag)
+            print('---------------------------------------')
+            print('Finding Data for Earthquake: '+event)
+            for matched_entry in self.session.query(Waveforms). \
+                    filter(or_(and_(Waveforms.starttime <= query_time, query_time < Waveforms.endtime),
+                               and_(query_time <= Waveforms.starttime, Waveforms.starttime < query_time + 20*60)),
+                           Waveforms.station.in_(select_sta),
+                           or_(*[Waveforms.component.like(comp) for comp in comp_list])):
 
-            # read in the data to obspy
-            temp_st = read(os.path.join(matched_entry.path, matched_entry.waveform_basename))
+                print(matched_entry.ASDF_tag)
 
-            # modify network header
-            temp_tr = temp_st[0]
-            temp_tr.stats.network = matched_entry.new_network
+                # read in the data to obspy
+                temp_st = read(os.path.join(matched_entry.path, matched_entry.waveform_basename))
 
-            st.append(temp_tr)
+                # modify network header
+                temp_tr = temp_st[0]
+                temp_tr.stats.network = matched_entry.new_network
 
-        if st.__nonzero__():
+                st.append(temp_tr)
 
-            # Attempt to merge all traces with matching ID'S in place
-            st.merge()
+            if st.__nonzero__():
 
-            # now trim the st object to 5 mins
-            # before query time and 15 minutes afterwards
-            trace_starttime = UTCDateTime(query_time - (5*60))
-            trace_endtime = UTCDateTime(query_time + (15*60))
+                # Attempt to merge all traces with matching ID'S in place
+                st.merge()
 
-            st.trim(starttime=trace_starttime, endtime=trace_endtime, pad=True, fill_value=0)
+                # now trim the st object to 5 mins
+                # before query time and 15 minutes afterwards
+                trace_starttime = UTCDateTime(query_time - (5*60))
+                trace_endtime = UTCDateTime(query_time + (15*60))
 
-            try:
-                # write traces into temporary directory
-                for tr in st:
-                    tr.write(os.path.join(temp_seed_out, tr.id + ".MSEED"), format="MSEED")
-                print("Wrote Temporary MiniSEED data to: " + temp_seed_out)
-                print('')
-            except:
-                print("Something Went Wrong!")
+                st.trim(starttime=trace_starttime, endtime=trace_endtime, pad=True, fill_value=0)
 
-        else:
-            print("No Data for Earthquake!")
+                try:
+                    # write traces into temporary directory
+                    for tr in st:
+                        tr.write(os.path.join(temp_seed_out, tr.id + ".MSEED"), format="MSEED")
+                    print("Wrote Temporary MiniSEED data to: " + temp_seed_out)
+                    print('')
+                except:
+                    print("Something Went Wrong!")
+
+            else:
+                print("No Data for Earthquake!")
 
 
 
