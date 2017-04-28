@@ -1,7 +1,8 @@
 from PyQt4 import QtCore, QtGui, QtWebKit, QtNetwork
-from obspy import read_inventory, read_events, UTCDateTime
+from obspy import read_inventory, read_events, UTCDateTime, Stream, read
 import functools
 import os
+
 import pandas as pd
 import numpy as np
 from query_input_yes_no import query_yes_no
@@ -405,12 +406,41 @@ class MainWindow(QtGui.QWidget):
         print(event)
         print(quake_df)
 
-        print(quake_df['qtime'])
+        query_time = quake_df['qtime'] - (10*60)
 
-        # for matched_waveform in self.session.query(Waveforms). \
-        #         filter(or_(and_(Waveforms.starttime <= quake_df['qtime'], quake_df['qtime'] < Waveforms.endtime),
-        #                    and_(quake_df['qtime'] <= Waveforms.starttime, Waveforms.starttime < quake_df['qtime'] + 3600)),
-        #                Waveforms.full_id.like('%raw_recording%')):
+        # Create a Stream object to put data into
+        st = Stream()
+
+        for matched_entry in self.session.query(Waveforms). \
+                filter(or_(and_(Waveforms.starttime <= query_time, query_time < Waveforms.endtime),
+                           and_(query_time <= Waveforms.starttime, Waveforms.starttime < query_time + 900)),
+                       Waveforms.component == 'EHZ'):
+
+            print(matched_entry.ASDF_tag)
+
+            #read in the data to obspy
+            st += read(os.path.join(matched_entry.path, matched_entry.waveform_basename))
+
+        if st.__nonzero__():
+
+            # Attempt to merge all traces with matching ID'S in place
+            st.merge()
+
+            # now trim the st object to 5 mins before query time and 15 minutes afterwards
+            trace_starttime = query_time - (5*60)
+            trace_endtime = query_time - (15*60)
+
+            st.trim(starttime=trace_starttime, endtime=trace_endtime, pad=True, fill_value=0)
+
+            try:
+                # write traces into temporary directory
+                pass
+            except:
+                print("something went wrong")
+
+        else:
+            print("No Data for Earthquake")
+
 
 
 
