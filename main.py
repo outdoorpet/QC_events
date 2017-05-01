@@ -1,4 +1,4 @@
-from PyQt4 import QtCore, QtGui, QtWebKit, QtNetwork
+from PyQt4 import QtCore, QtGui, QtWebKit, QtNetwork, uic
 from obspy import read_inventory, read_events, UTCDateTime, Stream, read
 import functools
 import os
@@ -11,13 +11,19 @@ import numpy as np
 from query_input_yes_no import query_yes_no
 import sys
 from station_tree_widget import StationTreeWidget
-from select_stacomp_dialog import Ui_SelectDialog
 
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import Column, Integer, String, and_, or_
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import func
+
+# load in Qt Designer UI files
+qc_events_ui = "qc_events.ui"
+select_stacomp_dialog_ui = "select_stacomp_dialog.ui"
+
+Ui_MainWindow, QtBaseClass = uic.loadUiType(qc_events_ui)
+Ui_SelectDialog, QtBaseClass = uic.loadUiType(select_stacomp_dialog_ui)
 
 STATION_VIEW_ITEM_TYPES = {
     "NETWORK": 0,
@@ -184,80 +190,42 @@ class TableDialog(QtGui.QDialog):
         self.show()
 
 
-class MainWindow(QtGui.QWidget):
+class MainWindow(QtGui.QMainWindow, Ui_MainWindow):
     """
     Main Window for metadata map GUI
     """
 
     def __init__(self):
         super(MainWindow, self).__init__()
-        self.setupUi()
+        Ui_MainWindow.__init__(self)
+        self.setupUi(self)
+
+        self.open_SQL_button.released.connect(self.open_SQL_file)
+        self.open_cat_button.released.connect(self.open_cat_file)
+        self.open_xml_button.released.connect(self.open_xml_file)
+
+        self.upd_stn_xml_frmsql.triggered.connect(self.update_xml_frm_SQL)
+
+        self.station_view.itemClicked.connect(self.station_view_itemClicked)
+
+        cache = QtNetwork.QNetworkDiskCache()
+        cache.setCacheDirectory("cache")
+        self.web_view.page().networkAccessManager().setCache(cache)
+        self.web_view.page().networkAccessManager()
+
+        self.web_view.page().mainFrame().addToJavaScriptWindowObject("MainWindow", self)
+        self.web_view.page().setLinkDelegationPolicy(QtWebKit.QWebPage.DelegateAllLinks)
+        self.web_view.load(QtCore.QUrl('map.html'))
+        self.web_view.loadFinished.connect(self.onLoadFinished)
+        self.web_view.linkClicked.connect(QtGui.QDesktopServices.openUrl)
+
+
         self.show()
         self.raise_()
 
-    def setupUi(self):
-
-        self.setWindowTitle("QC Events")
-
-        vbox = QtGui.QVBoxLayout()
-        self.setLayout(vbox)
-
-        buttons_hbox = QtGui.QHBoxLayout()
-
-        self.open_SQL_button = QtGui.QPushButton('Open SQL file for Network')
-        openSQL = functools.partial(self.open_SQL_file)
-        self.open_SQL_button.released.connect(openSQL)
-        buttons_hbox.addWidget(self.open_SQL_button)
-
-        self.open_cat_button = QtGui.QPushButton('Open Earthquake Catalogue')
-        openCat = functools.partial(self.open_cat_file)
-        self.open_cat_button.released.connect(openCat)
-        buttons_hbox.addWidget(self.open_cat_button)
-
-        self.open_xml_button = QtGui.QPushButton('Open StationXML')
-        openXml = functools.partial(self.open_xml_file)
-        self.open_xml_button.released.connect(openXml)
-        buttons_hbox.addWidget(self.open_xml_button)
-
-        vbox.addLayout(buttons_hbox)
-
-        main_grid_lay = QtGui.QGridLayout()
-
-        self.station_view = StationTreeWidget()
-        self.station_view.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
-        self.station_view.setAnimated(False)
-        self.station_view.setHeaderHidden(True)
-        self.station_view.setObjectName("station_view")
-        self.station_view.headerItem().setText(0, "1")
-        self.station_view.itemClicked.connect(self.station_view_itemClicked)
-
-        main_grid_lay.addWidget(self.station_view, 0, 0, 1, 1)
-
-        # self.SQL_view = QtGui.QTableView()
-        # self.SQL_view.setModel(QtSql.QSqlTableModel)
-        # self.SQL_view.setWindowTitle("Waveforms SQLite")
-        #
-        # main_grid_lay.addWidget(self.SQL_view)
-
-        view = self.view = QtWebKit.QWebView()
-        cache = QtNetwork.QNetworkDiskCache()
-        cache.setCacheDirectory("cache")
-        view.page().networkAccessManager().setCache(cache)
-        view.page().networkAccessManager()
-
-        view.page().mainFrame().addToJavaScriptWindowObject("MainWindow", self)
-        view.page().setLinkDelegationPolicy(QtWebKit.QWebPage.DelegateAllLinks)
-        view.load(QtCore.QUrl('map.html'))
-        view.loadFinished.connect(self.onLoadFinished)
-        view.linkClicked.connect(QtGui.QDesktopServices.openUrl)
-
-        main_grid_lay.addWidget(view, 0, 1, 1, 5)
-
-        vbox.addLayout(main_grid_lay)
-
     def onLoadFinished(self):
         with open('map.js', 'r') as f:
-            frame = self.view.page().mainFrame()
+            frame = self.web_view.page().mainFrame()
             frame.evaluateJavaScript(f.read())
 
     @QtCore.pyqtSlot(float, float, str, str, int)
@@ -467,7 +435,7 @@ class MainWindow(QtGui.QWidget):
 
             # Highlight the marker on the map
             js_call = "highlightEvent('{event_id}');".format(event_id=self.selected_row['event_id'])
-            self.view.page().mainFrame().evaluateJavaScript(js_call)
+            self.web_view.page().mainFrame().evaluateJavaScript(js_call)
 
     def plot_events(self):
         # Plot the events
@@ -477,7 +445,7 @@ class MainWindow(QtGui.QWidget):
                 .format(event_id=row['event_id'], df_id="cat", row_index=int(row_index), latitude=row['lat'],
                         longitude=row['lon'], a_color="Red",
                         p_color="#008000")
-            self.view.page().mainFrame().evaluateJavaScript(js_call)
+            self.web_view.page().mainFrame().evaluateJavaScript(js_call)
 
     def plot_inv(self):
         # plot the stations
@@ -486,7 +454,7 @@ class MainWindow(QtGui.QWidget):
             js_call = "addStation('{station_id}', {latitude}, {longitude});" \
                 .format(station_id=station.code, latitude=station.latitude,
                         longitude=station.longitude)
-            self.view.page().mainFrame().evaluateJavaScript(js_call)
+            self.web_view.page().mainFrame().evaluateJavaScript(js_call)
 
     def create_SG2K_initiate(self, event, quake_df):
 
@@ -557,12 +525,25 @@ class MainWindow(QtGui.QWidget):
     def update_xml_frm_SQL(self):
         # Look at the SQL database and create dictionary for start and end dates for each station
         #iterate through stations
-        for station in self.station_list:
-            print(station)
+        for i, station_obj in enumerate(self.inv[0]):
+            station = station_obj.code
 
             for min_max in self.session.query(func.min(Waveforms.starttime), func.max(Waveforms.endtime)). \
                     filter(Waveforms.station == station, Waveforms.component.like('__Z')):
-                print(min_max)
+                print(UTCDateTime(min_max[0]).ctime(), UTCDateTime(min_max[1]).ctime())
+
+
+                #fix the inventory
+                self.inv[0][i].start_date = UTCDateTime(min_max[0])
+                self.inv[0][i].end_date = UTCDateTime(min_max[1])
+
+                print(self.inv[0][i])
+
+        # Overwrite the origional station XML file
+        self.inv.write(self.stn_filename, format="STATIONXML")
+
+
+
 
 
 
