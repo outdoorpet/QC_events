@@ -1,4 +1,4 @@
-from PyQt4 import QtCore, QtGui, QtWebKit, QtNetwork, QtSql
+from PyQt4 import QtCore, QtGui, QtWebKit, QtNetwork
 from obspy import read_inventory, read_events, UTCDateTime, Stream, read
 import functools
 import os
@@ -17,6 +17,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import Column, Integer, String, and_, or_
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy import func
 
 STATION_VIEW_ITEM_TYPES = {
     "NETWORK": 0,
@@ -552,6 +553,16 @@ class MainWindow(QtGui.QWidget):
 
             else:
                 print("No Data for Earthquake!")
+
+    def update_xml_frm_SQL(self):
+        # Look at the SQL database and create dictionary for start and end dates for each station
+        #iterate through stations
+        for station in self.station_list:
+            print(station)
+
+            for min_max in self.session.query(func.min(Waveforms.starttime), func.max(Waveforms.endtime)). \
+                    filter(Waveforms.station == station, Waveforms.component.like('__Z')):
+                print(min_max)
 
 
 
