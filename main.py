@@ -512,7 +512,7 @@ class MainWindow(QtGui.QWidget):
                     filter(or_(and_(Waveforms.starttime <= query_time, query_time < Waveforms.endtime),
                                and_(query_time <= Waveforms.starttime, Waveforms.starttime < query_time + 20*60)),
                            Waveforms.station.in_(select_sta),
-                           or_(*[Waveforms.component.like(comp) for comp in comp_list])):
+                           or_(*[Waveforms.component.like(comp) for comp in query_comp])):
 
                 print(matched_entry.ASDF_tag)
 
