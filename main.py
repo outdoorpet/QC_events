@@ -51,6 +51,7 @@ class selectionDialog(QtGui.QDialog):
         QtGui.QDialog.__init__(self, parent)
         self.selui = Ui_SelectDialog()
         self.selui.setupUi(self)
+        self.setWindowTitle('Selection Dialog')
 
         # Set all check box to checked
         self.selui.check_all.setChecked(True)
@@ -152,7 +153,7 @@ class PandasModel(QtCore.QAbstractTableModel):
 
 class TableDialog(QtGui.QDialog):
     """
-    Class to create a separate child window to display the event catalogue and picks
+    Class to create a separate child window to display the event catalogue
     """
 
     def __init__(self, parent=None, cat_df=None):
@@ -178,7 +179,7 @@ class TableDialog(QtGui.QDialog):
 
         self.cat_event_table_view.setModel(self.cat_model)
 
-        self.setWindowTitle('Tables')
+        self.setWindowTitle('EQ Catalogue')
         self.show()
 
 
@@ -194,6 +195,9 @@ class MainWindow(QtGui.QWidget):
         self.raise_()
 
     def setupUi(self):
+
+        self.setWindowTitle("QC Events")
+
         vbox = QtGui.QVBoxLayout()
         self.setLayout(vbox)
 
@@ -510,7 +514,7 @@ class MainWindow(QtGui.QWidget):
             print('Finding Data for Earthquake: '+event)
             for matched_entry in self.session.query(Waveforms). \
                     filter(or_(and_(Waveforms.starttime <= query_time, query_time < Waveforms.endtime),
-                               and_(query_time <= Waveforms.starttime, Waveforms.starttime < query_time + 20*60)),
+                               and_(query_time <= Waveforms.starttime, Waveforms.starttime < query_time + 30*60)),
                            Waveforms.station.in_(select_sta),
                            or_(*[Waveforms.component.like(comp) for comp in query_comp])):
 
@@ -532,8 +536,8 @@ class MainWindow(QtGui.QWidget):
 
                 # now trim the st object to 5 mins
                 # before query time and 15 minutes afterwards
-                trace_starttime = UTCDateTime(query_time - (5*60))
-                trace_endtime = UTCDateTime(query_time + (15*60))
+                trace_starttime = UTCDateTime(quake_df['qtime'] - (5*60))
+                trace_endtime = UTCDateTime(quake_df['qtime'] + (15*60))
 
                 st.trim(starttime=trace_starttime, endtime=trace_endtime, pad=True, fill_value=0)
 
