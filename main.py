@@ -54,7 +54,7 @@ class selectionDialog(QtGui.QDialog):
     stackoverflow communication Feb 24th 2016:
     http://stackoverflow.com/questions/35611199/creating-a-toggling-check-all-checkbox-for-a-listview
     '''
-    def __init__(self, parent=None, sta_list=None):
+    def __init__(self, parent=None, sta_list=None, chan_list=None):
         QtGui.QDialog.__init__(self, parent)
         self.selui = Ui_SelectDialog()
         self.selui.setupUi(self)
@@ -64,23 +64,39 @@ class selectionDialog(QtGui.QDialog):
         self.selui.check_all.setChecked(True)
         self.selui.check_all.clicked.connect(self.selectAllCheckChanged)
 
-        self.model = QtGui.QStandardItemModel(self.selui.StaListView)
+        # add stations to station select items
+        self.sta_model = QtGui.QStandardItemModel(self.selui.StaListView)
 
         self.sta_list = sta_list
         for sta in self.sta_list:
             item = QtGui.QStandardItem(sta)
             item.setCheckable(True)
 
-            self.model.appendRow(item)
+            self.sta_model.appendRow(item)
 
-        self.selui.StaListView.setModel(self.model)
+        self.selui.StaListView.setModel(self.sta_model)
+        # connect to method to update stae of select all checkbox
         self.selui.StaListView.clicked.connect(self.listviewCheckChanged)
+
+        # add channels to channel select items
+        self.chan_model = QtGui.QStandardItemModel(self.selui.ChanListView)
+
+        self.chan_list = chan_list
+        for chan in self.chan_list:
+            item = QtGui.QStandardItem(chan)
+            item.setCheckable(True)
+
+            self.chan_model.appendRow(item)
+
+        self.selui.ChanListView.setModel(self.chan_model)
+
+
 
     def selectAllCheckChanged(self):
         ''' updates the listview based on select all checkbox '''
-        model = self.selui.StaListView.model()
-        for index in range(model.rowCount()):
-            item = model.item(index)
+        sta_model = self.selui.StaListView.model()
+        for index in range(sta_model.rowCount()):
+            item = sta_model.item(index)
             if item.isCheckable():
                 if self.selui.check_all.isChecked():
                     item.setCheckState(QtCore.Qt.Checked)
@@ -89,8 +105,8 @@ class selectionDialog(QtGui.QDialog):
 
     def listviewCheckChanged(self):
         ''' updates the select all checkbox based on the listview '''
-        model = self.selui.StaListView.model()
-        items = [model.item(index) for index in range(model.rowCount())]
+        sta_model = self.selui.StaListView.model()
+        items = [sta_model.item(index) for index in range(sta_model.rowCount())]
 
         if all(item.checkState() == QtCore.Qt.Checked for item in items):
             self.selui.check_all.setTristate(False)
@@ -104,16 +120,20 @@ class selectionDialog(QtGui.QDialog):
 
     def getSelected(self):
         select_stations = []
+        select_channels = []
         i = 0
-        while self.model.item(i):
-            if self.model.item(i).checkState():
-                select_stations.append(str(self.model.item(i).text()))
+        while self.sta_model.item(i):
+            if self.sta_model.item(i).checkState():
+                select_stations.append(str(self.sta_model.item(i).text()))
+            i += 1
+        i = 0
+        while self.chan_model.item(i):
+            if self.chan_model.item(i).checkState():
+                select_channels.append(str(self.chan_model.item(i).text()))
             i += 1
 
-        # Return Selected stations and checked components
-        return(select_stations, [self.selui.zcomp.isChecked(),
-               self.selui.ncomp.isChecked(),
-               self.selui.ecomp.isChecked()])
+        # Return Selected stations and selected channels
+        return(select_stations, select_channels)
 
 
 class PandasModel(QtCore.QAbstractTableModel):
@@ -204,7 +224,8 @@ class MainWindow(QtGui.QMainWindow, Ui_MainWindow):
         self.open_cat_button.released.connect(self.open_cat_file)
         self.open_xml_button.released.connect(self.open_xml_file)
 
-        self.upd_stn_xml_frmsql.triggered.connect(self.update_xml_frm_SQL)
+        self.action_upd_xml_sql.triggered.connect(self.upd_xml_sql)
+        self.action_get_gaps_sql.triggered.connect(self.get_gaps_sql)
 
         self.station_view.itemClicked.connect(self.station_view_itemClicked)
 
@@ -309,6 +330,15 @@ class MainWindow(QtGui.QMainWindow, Ui_MainWindow):
             return
 
         self.inv = read_inventory(self.stn_filename)
+
+        print('')
+        print(self.inv)
+
+        self.channel_codes = []
+        # get the channel names for dataset
+        for _j, chan in enumerate(self.inv[0][0]):
+            self.channel_codes.append(self.inv[0][0][_j].code)
+
         self.plot_inv()
 
         self.build_station_view_list()
@@ -449,7 +479,6 @@ class MainWindow(QtGui.QMainWindow, Ui_MainWindow):
 
     def plot_inv(self):
         # plot the stations
-        print(self.inv)
         for i, station in enumerate(self.inv[0]):
             js_call = "addStation('{station_id}', {latitude}, {longitude});" \
                 .format(station_id=station.code, latitude=station.latitude,
@@ -458,13 +487,10 @@ class MainWindow(QtGui.QMainWindow, Ui_MainWindow):
 
     def create_SG2K_initiate(self, event, quake_df):
 
-        comp_list = ['__Z', '__N', '__E']
-
         # Launch the custom station/component selection dialog
-        sel_dlg = selectionDialog(parent=self, sta_list=self.station_list)
+        sel_dlg = selectionDialog(parent=self, sta_list=self.station_list, chan_list=self.channel_codes)
         if sel_dlg.exec_():
-            select_sta, bool_comp = sel_dlg.getSelected()
-            query_comp = list(itertools.compress(comp_list, bool_comp))
+            select_sta, select_comp = sel_dlg.getSelected()
 
             # specify output directory for miniSEED files
             temp_seed_out = os.path.join(os.path.dirname(self.cat_filename), event)
@@ -485,7 +511,7 @@ class MainWindow(QtGui.QMainWindow, Ui_MainWindow):
                     filter(or_(and_(Waveforms.starttime <= query_time, query_time < Waveforms.endtime),
                                and_(query_time <= Waveforms.starttime, Waveforms.starttime < query_time + 30*60)),
                            Waveforms.station.in_(select_sta),
-                           or_(*[Waveforms.component.like(comp) for comp in query_comp])):
+                           Waveforms.component.in_(select_comp)):
 
                 print(matched_entry.ASDF_tag)
 
@@ -522,30 +548,52 @@ class MainWindow(QtGui.QMainWindow, Ui_MainWindow):
             else:
                 print("No Data for Earthquake!")
 
-    def update_xml_frm_SQL(self):
+    def upd_xml_sql(self):
         # Look at the SQL database and create dictionary for start and end dates for each station
         #iterate through stations
         for i, station_obj in enumerate(self.inv[0]):
             station = station_obj.code
 
+
+            print("\nQuerying SQLite database for start/end dates for each station")
+            print("This may take a while.......")
+
             for min_max in self.session.query(func.min(Waveforms.starttime), func.max(Waveforms.endtime)). \
                     filter(Waveforms.station == station, Waveforms.component.like('__Z')):
-                print(UTCDateTime(min_max[0]).ctime(), UTCDateTime(min_max[1]).ctime())
+
+                print("\nRecording interval for: " + station)
+                print("\tStart Date: " + UTCDateTime(min_max[0]).ctime())
+                print("\tEnd Date:   " + UTCDateTime(min_max[1]).ctime())
 
 
-                #fix the inventory
+                #fix the station inventory
                 self.inv[0][i].start_date = UTCDateTime(min_max[0])
                 self.inv[0][i].end_date = UTCDateTime(min_max[1])
 
-                print(self.inv[0][i])
+                # Fix the channel
+                for _j, chan in enumerate(self.inv[0][i]):
+                    self.inv[0][i][_j].start_date = UTCDateTime(min_max[0])
+                    self.inv[0][i][_j].end_date = UTCDateTime(min_max[0])
 
         # Overwrite the origional station XML file
         self.inv.write(self.stn_filename, format="STATIONXML")
+        print("\nFinished Updating StationXML file: " + self.stn_filename)
+
+    def get_gaps_sql(self):
+        # go through SQL entries and find all gaps
+        # iterate through stations
+        for station in self.station_list:
+            print('_______________')
+            print(station)
+
+            #store for previous end time for a particular component in dictionary
 
 
+            for entry in (self.session.query(Waveforms)
+                                  .filter(Waveforms.station == station)
+                                  .order_by(Waveforms.starttime)):
 
-
-
+                print(entry.ASDF_tag)
 
 
 if __name__ == '__main__':

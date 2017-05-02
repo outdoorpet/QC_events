@@ -104,10 +104,6 @@
      </layout>
     </item>
    </layout>
-   <zorder>gridLayoutWidget</zorder>
-   <zorder>web_view</zorder>
-   <zorder>verticalLayoutWidget</zorder>
-   <zorder>horizontalLayoutWidget</zorder>
    <zorder></zorder>
   </widget>
   <widget class="QMenuBar" name="menubar">
@@ -123,20 +119,26 @@
     <property name="title">
      <string>Tools</string>
     </property>
-    <addaction name="upd_stn_xml_frmsql"/>
-    <addaction name="generate_sqlite"/>
+    <addaction name="action_upd_xml_sql"/>
+    <addaction name="action_generate_sql"/>
+    <addaction name="action_get_gaps_sql"/>
    </widget>
    <addaction name="menuTools"/>
   </widget>
   <widget class="QStatusBar" name="statusbar"/>
-  <action name="upd_stn_xml_frmsql">
+  <action name="action_upd_xml_sql">
    <property name="text">
     <string>Upd StnXML frm SQL</string>
    </property>
   </action>
-  <action name="generate_sqlite">
+  <action name="action_generate_sql">
    <property name="text">
     <string>Create SQLite DB</string>
+   </property>
+  </action>
+  <action name="action_get_gaps_sql">
+   <property name="text">
+    <string>Get Gap Info frm SQL</string>
    </property>
   </action>
  </widget>
