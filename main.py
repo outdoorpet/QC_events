@@ -348,7 +348,7 @@ class MainWindow(QtGui.QMainWindow, Ui_MainWindow):
             return
 
         print('')
-        print("Initializing SQLite Database..")
+        print("Initializing Metadata Database..")
 
         if os.path.splitext(self.db_filename)[1] == ".db":
 
@@ -368,6 +368,8 @@ class MainWindow(QtGui.QMainWindow, Ui_MainWindow):
 
                 # json_load = json.load(f)
                 self.network_dict = json.load(f)
+
+            print("JSON --> Dictionary Load Done!")
 
                 # self.network_dict = json.loads(json_load)
 
