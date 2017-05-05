@@ -3,8 +3,11 @@ from obspy import read_inventory, read_events, UTCDateTime, Stream, read
 import functools
 import os
 import shutil
-import itertools
 import re
+import pyqtgraph as pg
+import json
+
+from DateAxisItem import DateAxisItem
 
 import pandas as pd
 import numpy as np
@@ -13,10 +16,11 @@ import sys
 from station_tree_widget import StationTreeWidget
 
 from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy import Column, Integer, String, and_, or_
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import func
+
+from waveforms_db import Waveforms
 
 # load in Qt Designer UI files
 qc_events_ui = "qc_events.ui"
@@ -27,25 +31,10 @@ Ui_SelectDialog, QtBaseClass = uic.loadUiType(select_stacomp_dialog_ui)
 
 STATION_VIEW_ITEM_TYPES = {
     "NETWORK": 0,
-    "STATION": 1}
-
-# Set up the sql waveform databases
-Base = declarative_base()
-
-
-class Waveforms(Base):
-    __tablename__ = 'waveforms'
-    # Here we define columns for the table
-    starttime = Column(Integer)
-    endtime = Column(Integer)
-    orig_network = Column(String(2), nullable=False)
-    new_network = Column(String(2), nullable=False)
-    station = Column(String(5), nullable=False)
-    component = Column(String(3), nullable=False)
-    location = Column(String(2), nullable=False)
-    waveform_basename = Column(String(40), nullable=False, primary_key=True)
-    path = Column(String(100), nullable=False)
-    ASDF_tag = Column(String(100), nullable=False)
+    "STATION": 1,
+    "CHANNEL": 2,
+    "STN_INFO": 3,
+    "CHAN_INFO": 4}
 
 
 class selectionDialog(QtGui.QDialog):
@@ -54,6 +43,7 @@ class selectionDialog(QtGui.QDialog):
     stackoverflow communication Feb 24th 2016:
     http://stackoverflow.com/questions/35611199/creating-a-toggling-check-all-checkbox-for-a-listview
     '''
+
     def __init__(self, parent=None, sta_list=None, chan_list=None):
         QtGui.QDialog.__init__(self, parent)
         self.selui = Ui_SelectDialog()
@@ -61,7 +51,7 @@ class selectionDialog(QtGui.QDialog):
         self.setWindowTitle('Selection Dialog')
 
         # Set all check box to checked
-        self.selui.check_all.setChecked(True)
+        # self.selui.check_all.setChecked(True)
         self.selui.check_all.clicked.connect(self.selectAllCheckChanged)
 
         # add stations to station select items
@@ -89,8 +79,6 @@ class selectionDialog(QtGui.QDialog):
             self.chan_model.appendRow(item)
 
         self.selui.ChanListView.setModel(self.chan_model)
-
-
 
     def selectAllCheckChanged(self):
         ''' updates the listview based on select all checkbox '''
@@ -133,7 +121,7 @@ class selectionDialog(QtGui.QDialog):
             i += 1
 
         # Return Selected stations and selected channels
-        return(select_stations, select_channels)
+        return (select_stations, select_channels)
 
 
 class PandasModel(QtCore.QAbstractTableModel):
@@ -210,6 +198,93 @@ class TableDialog(QtGui.QDialog):
         self.show()
 
 
+class DataAvailPlot(QtGui.QDialog):
+    '''
+    Dialog for Data Availablity plot
+    '''
+
+    def __init__(self, parent=None, sta_list=None, chan_list=None, rec_int_dict=None):
+        super(DataAvailPlot, self).__init__(parent)
+        self.setWindowTitle('Data Availability Plot')
+
+        self.rec_int_dict = rec_int_dict
+        self.sta_list = sta_list
+        self.chan_list = chan_list
+
+        self.initUI()
+        self.plot_data()
+
+    def initUI(self):
+        vbox = QtGui.QVBoxLayout()
+        self.setLayout(vbox)
+
+        self.data_avail_graph_view = pg.GraphicsLayoutWidget()
+
+        vbox.addWidget(self.data_avail_graph_view)
+
+        self.show()
+
+    def dispMousePos(self, pos):
+        # Display current mouse coords if over the scatter plot area as a tooltip
+        try:
+            x_coord = UTCDateTime(self.plot.vb.mapSceneToView(pos).toPoint().x()).ctime()
+            self.time_tool = self.plot.setToolTip(x_coord)
+        except:
+            pass
+
+    def plot_data(self):
+        # Launch the custom station/component selection dialog
+        sel_dlg = selectionDialog(parent=self, sta_list=self.sta_list, chan_list=self.chan_list)
+        if sel_dlg.exec_():
+            select_sta, select_comp = sel_dlg.getSelected()
+
+            enum_sta = list(enumerate(select_sta))
+            # rearrange dict
+            sta_id_dict = dict([(b, a) for a, b in enum_sta])
+
+            y_axis_string = pg.AxisItem(orientation='left')
+            y_axis_string.setTicks([enum_sta])
+
+            def get_sta_id(sta):
+                return (sta_id_dict[sta])
+
+            # Set up the plotting area
+            self.plot = self.data_avail_graph_view.addPlot(0, 0,
+                                                           axisItems={'bottom': DateAxisItem(orientation='bottom',
+                                                                                             utcOffset=0),
+                                                                      'left': y_axis_string})
+            self.plot.setMouseEnabled(x=True, y=False)
+            # When Mouse is moved over plot print the data coordinates
+            self.plot.scene().sigMouseMoved.connect(self.dispMousePos)
+
+            rec_midpoints = []
+            sta_ids = []
+            diff_frm_mid_list = []
+
+            # iterate through stations
+            for stn_key, chan_dict in self.rec_int_dict.iteritems():
+                if not stn_key in select_sta:
+                    continue
+                # iterate through channels
+                for chan_key, rec_list in chan_dict.iteritems():
+                    if not chan_key in select_comp:
+                        continue
+                    # iterate through gaps list
+                    for rec_entry in rec_list:
+                        diff_frm_mid = (rec_entry['rec_end'] - rec_entry['rec_start']) / 2.0
+
+                        diff_frm_mid_list.append(diff_frm_mid)
+
+                        rec_midpoints.append(rec_entry['rec_start'] + diff_frm_mid)
+                        sta_ids.append(get_sta_id(stn_key))
+
+            # Plot Error bar data recording intervals
+            err = pg.ErrorBarItem(x=np.array(rec_midpoints), y=np.array(sta_ids), left=np.array(diff_frm_mid_list),
+                                  right=np.array(diff_frm_mid_list), beam=0.06)
+
+            self.plot.addItem(err)
+
+
 class MainWindow(QtGui.QMainWindow, Ui_MainWindow):
     """
     Main Window for metadata map GUI
@@ -220,12 +295,13 @@ class MainWindow(QtGui.QMainWindow, Ui_MainWindow):
         Ui_MainWindow.__init__(self)
         self.setupUi(self)
 
-        self.open_SQL_button.released.connect(self.open_SQL_file)
+        self.open_db_button.released.connect(self.open_db_file)
         self.open_cat_button.released.connect(self.open_cat_file)
         self.open_xml_button.released.connect(self.open_xml_file)
 
         self.action_upd_xml_sql.triggered.connect(self.upd_xml_sql)
         self.action_get_gaps_sql.triggered.connect(self.get_gaps_sql)
+        self.action_plot_gaps_overlaps.triggered.connect(self.plot_gaps_overlaps)
 
         self.station_view.itemClicked.connect(self.station_view_itemClicked)
 
@@ -239,7 +315,6 @@ class MainWindow(QtGui.QMainWindow, Ui_MainWindow):
         self.web_view.load(QtCore.QUrl('map.html'))
         self.web_view.loadFinished.connect(self.onLoadFinished)
         self.web_view.linkClicked.connect(QtGui.QDesktopServices.openUrl)
-
 
         self.show()
         self.raise_()
@@ -264,26 +339,37 @@ class MainWindow(QtGui.QMainWindow, Ui_MainWindow):
         except AttributeError:
             pass
 
-    def open_SQL_file(self):
-        self.SQL_filename = str(QtGui.QFileDialog.getOpenFileName(
+    def open_db_file(self):
+        self.db_filename = str(QtGui.QFileDialog.getOpenFileName(
             parent=self, caption="Choose SQLite Database File",
             directory=os.path.expanduser("~"),
-            filter="SQLite Files (*.db)"))
-        if not self.SQL_filename:
+            filter="Database Files (*.db *.json)"))
+        if not self.db_filename:
             return
 
         print('')
         print("Initializing SQLite Database..")
 
-        # Open and create the SQL file
-        # Create an engine that stores data
-        self.engine = create_engine('sqlite:////' + self.SQL_filename)
+        if os.path.splitext(self.db_filename)[1] == ".db":
 
-        # Initiate a session with the SQL database so that we can add data to it
-        self.Session = sessionmaker(bind=self.engine)
-        self.session = self.Session()
+            # Open and create the SQL file
+            # Create an engine that stores data
+            self.engine = create_engine('sqlite:////' + self.db_filename)
 
-        print("SQLite Initializing Done!")
+            # Initiate a session with the SQL database so that we can add data to it
+            self.Session = sessionmaker(bind=self.engine)
+            self.session = self.Session()
+
+            print("SQLite Initializing Done!")
+
+        elif os.path.splitext(self.db_filename)[1] == ".json":
+
+            with open(self.db_filename, 'r') as f:
+
+                # json_load = json.load(f)
+                self.network_dict = json.load(f)
+
+                # self.network_dict = json.loads(json_load)
 
     def open_cat_file(self):
         self.cat_filename = str(QtGui.QFileDialog.getOpenFileName(
@@ -312,7 +398,7 @@ class MainWindow(QtGui.QMainWindow, Ui_MainWindow):
 
             self.cat_df.loc[_i] = [str(event.resource_id.id).split('=')[1], int(origin_info.time.timestamp),
                                    origin_info.latitude, origin_info.longitude,
-                                   origin_info.depth/1000, magnitude]
+                                   origin_info.depth / 1000, magnitude]
 
         self.cat_df.reset_index(drop=True, inplace=True)
 
@@ -348,21 +434,63 @@ class MainWindow(QtGui.QMainWindow, Ui_MainWindow):
 
         items = []
 
-        item = QtGui.QTreeWidgetItem(
+        network_item = QtGui.QTreeWidgetItem(
             [self.inv[0].code], type=STATION_VIEW_ITEM_TYPES["NETWORK"])
 
         # Add all children stations.
-        self.station_list = []
-        children = [] #pyqt QtreeWidget items
+        self.station_list = []  # pyqt QtreeWidget items
 
         for i, station in enumerate(self.inv[0]):
+            station_children = []  # pyqt QtreeWidget items
             self.station_list.append(str(station.code))
-            children.append(
-                QtGui.QTreeWidgetItem(
-                    [station.code], type=STATION_VIEW_ITEM_TYPES["STATION"]))
-        item.addChildren(children)
+            station_item = QtGui.QTreeWidgetItem(
+                [station.code], type=STATION_VIEW_ITEM_TYPES["STATION"])
 
-        items.append(item)
+            # add info children
+            station_children = [
+                QtGui.QTreeWidgetItem(['StartDate: \t%s' % station.start_date.strftime('%Y-%m-%dT%H:%M:%S')],
+                                      type=STATION_VIEW_ITEM_TYPES["STN_INFO"]),
+                QtGui.QTreeWidgetItem(['EndDate: \t%s' % station.end_date.strftime('%Y-%m-%dT%H:%M:%S')],
+                                      type=STATION_VIEW_ITEM_TYPES["STN_INFO"]),
+                QtGui.QTreeWidgetItem(['Latitude: \t%s' % station.latitude], type=STATION_VIEW_ITEM_TYPES["STN_INFO"]),
+                QtGui.QTreeWidgetItem(['Longitude: \t%s' % station.longitude],
+                                      type=STATION_VIEW_ITEM_TYPES["STN_INFO"]),
+                QtGui.QTreeWidgetItem(['Elevation: \t%s' % station.elevation],
+                                      type=STATION_VIEW_ITEM_TYPES["STN_INFO"])]
+
+            station_item.addChildren(station_children)
+
+            # add channel items
+            for channel in station:
+                channel_item = QtGui.QTreeWidgetItem(
+                    [channel.code], type=STATION_VIEW_ITEM_TYPES["CHANNEL"])
+
+                channel_children = [
+                    QtGui.QTreeWidgetItem(['StartDate: \t%s' % station.start_date.strftime('%Y-%m-%dT%H:%M:%S')],
+                                          type=STATION_VIEW_ITEM_TYPES["CHAN_INFO"]),
+                    QtGui.QTreeWidgetItem(['EndDate: \t%s' % station.end_date.strftime('%Y-%m-%dT%H:%M:%S')],
+                                          type=STATION_VIEW_ITEM_TYPES["CHAN_INFO"]),
+                    QtGui.QTreeWidgetItem(['Location: \t%s' % channel.location_code],
+                                          type=STATION_VIEW_ITEM_TYPES["CHAN_INFO"]),
+                    QtGui.QTreeWidgetItem(['SamplRate: \t%s' % channel.sample_rate],
+                                          type=STATION_VIEW_ITEM_TYPES["CHAN_INFO"]),
+                    QtGui.QTreeWidgetItem(['Azimuth: \t%s' % channel.azimuth],
+                                          type=STATION_VIEW_ITEM_TYPES["CHAN_INFO"]),
+                    QtGui.QTreeWidgetItem(['Dip: \t%s' % channel.dip], type=STATION_VIEW_ITEM_TYPES["CHAN_INFO"]),
+                    QtGui.QTreeWidgetItem(['Latitude: \t%s' % channel.latitude],
+                                          type=STATION_VIEW_ITEM_TYPES["CHAN_INFO"]),
+                    QtGui.QTreeWidgetItem(['Longitude: \t%s' % channel.longitude],
+                                          type=STATION_VIEW_ITEM_TYPES["CHAN_INFO"]),
+                    QtGui.QTreeWidgetItem(['Elevation: \t%s' % channel.elevation],
+                                          type=STATION_VIEW_ITEM_TYPES["CHAN_INFO"])]
+
+                channel_item.addChildren(channel_children)
+
+                station_item.addChild(channel_item)
+
+            network_item.addChild(station_item)
+
+        items.append(network_item)
 
         self.station_view.insertTopLevelItems(0, items)
 
@@ -380,10 +508,9 @@ class MainWindow(QtGui.QMainWindow, Ui_MainWindow):
         elif t == STATION_VIEW_ITEM_TYPES["STATION"]:
             station = get_station(item)
 
-
             # Highlight the station marker on the map
             js_call = "highlightStation('{station}');".format(station=station.split('.')[1])
-            self.view.page().mainFrame().evaluateJavaScript(js_call)
+            self.web_view.page().mainFrame().evaluateJavaScript(js_call)
         else:
             pass
 
@@ -500,29 +627,51 @@ class MainWindow(QtGui.QMainWindow, Ui_MainWindow):
                 shutil.rmtree(temp_seed_out)
             os.mkdir(temp_seed_out)
 
-            query_time = UTCDateTime(quake_df['qtime'] - (10*60)).timestamp
+            query_time = UTCDateTime(quake_df['qtime'] - (10 * 60)).timestamp
 
             # Create a Stream object to put data into
             st = Stream()
 
             print('---------------------------------------')
-            print('Finding Data for Earthquake: '+event)
-            for matched_entry in self.session.query(Waveforms). \
-                    filter(or_(and_(Waveforms.starttime <= query_time, query_time < Waveforms.endtime),
-                               and_(query_time <= Waveforms.starttime, Waveforms.starttime < query_time + 30*60)),
-                           Waveforms.station.in_(select_sta),
-                           Waveforms.component.in_(select_comp)):
+            print('Finding Data for Earthquake: ' + event)
 
-                print(matched_entry.ASDF_tag)
+            if os.path.splitext(self.db_filename)[1] == ".db":
+                # run SQL query
+                for matched_entry in self.session.query(Waveforms). \
+                        filter(or_(and_(Waveforms.starttime <= query_time, query_time < Waveforms.endtime),
+                                   and_(query_time <= Waveforms.starttime, Waveforms.starttime < query_time + 30 * 60)),
+                               Waveforms.station.in_(select_sta),
+                               Waveforms.component.in_(select_comp)):
+                    print(matched_entry.ASDF_tag)
 
-                # read in the data to obspy
-                temp_st = read(os.path.join(matched_entry.path, matched_entry.waveform_basename))
+                    # read in the data to obspy
+                    temp_st = read(os.path.join(matched_entry.path, matched_entry.waveform_basename))
 
-                # modify network header
-                temp_tr = temp_st[0]
-                temp_tr.stats.network = matched_entry.new_network
+                    # modify network header
+                    temp_tr = temp_st[0]
+                    temp_tr.stats.network = matched_entry.new_network
 
-                st.append(temp_tr)
+                    st.append(temp_tr)
+
+            if os.path.splitext(self.db_filename)[1] == ".json":
+                # run python dictionary query
+                for key, matched_entry in self.network_dict.iteritems():
+                    if ((matched_entry['starttime'] <= query_time < matched_entry['endtime']) \
+                                or (
+                                query_time <= matched_entry['starttime'] and matched_entry['starttime'] < query_time + (
+                            30 * 60))) \
+                            and ((matched_entry['station'] in select_sta) and (
+                                matched_entry['component'] in select_comp)):
+                        print(matched_entry['ASDF_tag'])
+
+                        # read in the data to obspy
+                        temp_st = read(os.path.join(matched_entry['path'], key))
+
+                        # modify network header
+                        temp_tr = temp_st[0]
+                        temp_tr.stats.network = matched_entry['new_network']
+
+                        st.append(temp_tr)
 
             if st.__nonzero__():
 
@@ -531,8 +680,8 @@ class MainWindow(QtGui.QMainWindow, Ui_MainWindow):
 
                 # now trim the st object to 5 mins
                 # before query time and 15 minutes afterwards
-                trace_starttime = UTCDateTime(quake_df['qtime'] - (5*60))
-                trace_endtime = UTCDateTime(quake_df['qtime'] + (15*60))
+                trace_starttime = UTCDateTime(quake_df['qtime'] - (5 * 60))
+                trace_endtime = UTCDateTime(quake_df['qtime'] + (15 * 60))
 
                 st.trim(starttime=trace_starttime, endtime=trace_endtime, pad=True, fill_value=0)
 
@@ -550,50 +699,236 @@ class MainWindow(QtGui.QMainWindow, Ui_MainWindow):
 
     def upd_xml_sql(self):
         # Look at the SQL database and create dictionary for start and end dates for each station
-        #iterate through stations
+        # iterate through stations
+
+        print("\nQuerying SQLite database for start/end dates for each station")
+        print("This may take a while.......")
+
+        def overwrite_info(st, et):
+            # fix the station inventory
+            self.inv[0][i].start_date = st
+            self.inv[0][i].end_date = et
+
+            # Fix the channel
+            for _j, chan in enumerate(self.inv[0][i]):
+                self.inv[0][i][_j].start_date = st
+                self.inv[0][i][_j].end_date = et
+
         for i, station_obj in enumerate(self.inv[0]):
             station = station_obj.code
+            comp_regex = re.compile('..Z')
 
+            if os.path.splitext(self.db_filename)[1] == ".db":
 
-            print("\nQuerying SQLite database for start/end dates for each station")
-            print("This may take a while.......")
+                for min_max in self.session.query(func.min(Waveforms.starttime), func.max(Waveforms.endtime)). \
+                        filter(Waveforms.station == station, Waveforms.component.like('__Z')):
+                    start_time = UTCDateTime(min_max[0])
+                    end_time = UTCDateTime(min_max[1])
 
-            for min_max in self.session.query(func.min(Waveforms.starttime), func.max(Waveforms.endtime)). \
-                    filter(Waveforms.station == station, Waveforms.component.like('__Z')):
+            elif os.path.splitext(self.db_filename)[1] == ".json":
+                temp_extent = []
+                for key, matched_entry in self.network_dict.iteritems():
+                    if (matched_entry['station'] == station) and re.match(comp_regex, matched_entry['component']):
+                        if len(temp_extent) == 0:
+                            # first iteration
+                            temp_extent = [matched_entry['starttime'], matched_entry['endtime']]
+                            continue
 
-                print("\nRecording interval for: " + station)
-                print("\tStart Date: " + UTCDateTime(min_max[0]).ctime())
-                print("\tEnd Date:   " + UTCDateTime(min_max[1]).ctime())
+                        # check the current iterate
+                        if (matched_entry['starttime'] < temp_extent[0]):
+                            temp_extent[0] = matched_entry['starttime']
 
+                        if (matched_entry['endtime'] > temp_extent[1]):
+                            temp_extent[1] = matched_entry['endtime']
 
-                #fix the station inventory
-                self.inv[0][i].start_date = UTCDateTime(min_max[0])
-                self.inv[0][i].end_date = UTCDateTime(min_max[1])
+                start_time = UTCDateTime(temp_extent[0])
+                end_time = UTCDateTime(temp_extent[1])
 
-                # Fix the channel
-                for _j, chan in enumerate(self.inv[0][i]):
-                    self.inv[0][i][_j].start_date = UTCDateTime(min_max[0])
-                    self.inv[0][i][_j].end_date = UTCDateTime(min_max[0])
+            print("\nRecording interval for: " + station)
+            print("\tStart Date: " + start_time.ctime())
+            print("\tEnd Date:   " + end_time.ctime())
 
-        # Overwrite the origional station XML file
+            overwrite_info(start_time, end_time)
+
+        # Overwrite the original station XML file
         self.inv.write(self.stn_filename, format="STATIONXML")
         print("\nFinished Updating StationXML file: " + self.stn_filename)
 
     def get_gaps_sql(self):
-        # go through SQL entries and find all gaps
+        # go through SQL entries and find all gaps save them into dictionary
+        self.recording_gaps = {}
+        self.recording_overlaps = {}
+        self.recording_intervals = {}
+
+        print('_________________')
+
+        print("\nIterating through SQL entries to find data gaps")
+        print("This may take a while......")
+
         # iterate through stations
-        for station in self.station_list:
-            print('_______________')
-            print(station)
+        for _i, station in enumerate(self.station_list):
+            print "\r Working on Station: " + station + ", " + str(_i + 1) + " of " + \
+                  str(len(self.station_list)) + " Stations",
+            sys.stdout.flush()
+            self.recording_gaps[station] = {}
+            self.recording_overlaps[station] = {}
+            self.recording_intervals[station] = {}
 
-            #store for previous end time for a particular component in dictionary
+            # store for previous end time for a particular component in dictionary
+            comp_endtime_dict = {}
+            gaps_no_dict = {}
+            ovlps_no_dict = {}
 
+            # create new entry into recording gaps dict for each channel
+            for chan in self.channel_codes:
+                self.recording_gaps[station][chan] = []
+                self.recording_overlaps[station][chan] = []
+                self.recording_intervals[station][chan] = []
+                gaps_no_dict[chan] = 0
+                ovlps_no_dict[chan] = 0
 
-            for entry in (self.session.query(Waveforms)
-                                  .filter(Waveforms.station == station)
-                                  .order_by(Waveforms.starttime)):
+            if os.path.splitext(self.db_filename)[1] == ".db":
+                for entry in (self.session.query(Waveforms)
+                                      .filter(Waveforms.station == station)
+                                      .order_by(Waveforms.starttime)):
 
-                print(entry.ASDF_tag)
+                    # print(entry.ASDF_tag)
+                    # print(UTCDateTime(entry.starttime).ctime())
+                    # print(UTCDateTime(entry.endtime).ctime())
+                    # print(entry.waveform_basename)
+                    # print(entry.path)
+
+                    # if there is a previous timestamp in the dict then calculate diff tween the previous endtime and the
+                    # currently iterated starttime
+                    if entry.component in comp_endtime_dict.keys():
+                        """
+                        This is where the algorithm to analyse gaps/overlaps would go
+                        for now it is just a simple analysis to find large data gaps (corresponding to service intervals)
+                        """
+
+                        prev_endtime = comp_endtime_dict[entry.component]
+
+                        diff = entry.starttime - prev_endtime
+
+                        # get large gap
+                        if diff > 1:
+                            gaps_no_dict[entry.component] += 1
+                            self.recording_gaps[station][entry.component].append({"gap_start": prev_endtime,
+                                                                                  "gap_end": entry.starttime})
+                            # print(UTCDateTime(prev_endtime).ctime(), UTCDateTime(entry.starttime).ctime())
+                        # check if overalp
+                        elif diff < -1:
+                            ovlps_no_dict[entry.component] += 1
+                            self.recording_overlaps[station][entry.component].append({"ovlp_start": entry.starttime,
+                                                                                      "ovlp_end": prev_endtime})
+
+                        # add current iterate to dictionary
+                        comp_endtime_dict[entry.component] = entry.endtime
+
+                    else:
+                        # there is no component in dictionary (i.e first iteration for component)
+                        # add current iterate to dictionary
+                        comp_endtime_dict[entry.component] = entry.endtime
+
+            elif os.path.splitext(self.db_filename)[1] == ".json":
+                # sort the dictionary by the starttime field
+                sorted_keys = sorted(self.network_dict, key=lambda x: self.network_dict[x]['starttime'])
+
+                for key in sorted_keys:
+                    entry = self.network_dict[key]
+                    if (entry['station'] == station):
+
+                        # print(entry['ASDF_tag'])
+                        # print(UTCDateTime(entry['starttime']).ctime())
+                        # print(UTCDateTime(entry['endtime']).ctime())
+                        # print(key)
+                        # print(entry['path'])
+
+                        # if there is a previous timestamp in the dict then calculate diff tween the previous endtime and the
+                        # currently iterated starttime
+                        if entry['component'] in comp_endtime_dict.keys():
+                            """
+                            This is where the algorithm to analyse gaps/overlaps would go
+                            for now it is just a simple analysis to find large data gaps (corresponding to service intervals)
+                            """
+
+                            prev_endtime = comp_endtime_dict[entry['component']]
+
+                            diff = entry['starttime'] - prev_endtime
+
+                            # get large gap
+                            if diff > 1:
+                                gaps_no_dict[entry['component']] += 1
+                                self.recording_gaps[station][entry['component']].append({"gap_start": prev_endtime,
+                                                                                         "gap_end": entry['starttime']})
+                                # print(UTCDateTime(prev_endtime).ctime(), UTCDateTime(entry['starttime).ctime())
+                            # check if overalp
+                            elif diff < -1:
+                                ovlps_no_dict[entry['component']] += 1
+                                self.recording_overlaps[station][entry['component']].append(
+                                    {"ovlp_start": entry['starttime'],
+                                     "ovlp_end": prev_endtime})
+
+                            # add current iterate to dictionary
+                            comp_endtime_dict[entry['component']] = entry['endtime']
+
+                        else:
+                            # there is no component in dictionary (i.e first iteration for component)
+                            # add current iterate to dictionary
+                            comp_endtime_dict[entry['component']] = entry['endtime']
+
+                            # # print("Found: ")
+                            # for chan in self.channel_codes:
+                            #     print("\tChannel: " + chan +" "+ str(gaps_no_dict[chan]) +
+                            #           " Gaps and " + str(ovlps_no_dict[chan]) + " Overlaps!")
+
+        self.calculate_recording_int()
+
+    def calculate_recording_int(self):
+        # iterate through stations
+        for i, station_obj in enumerate(self.inv[0]):
+            station = station_obj.code
+
+            # get the start_date and end_date for station recording
+            rec_start = self.inv[0][i].start_date.timestamp
+            rec_end = self.inv[0][i].end_date.timestamp
+
+            # store for previous end time for a particular component in dictionary
+            comp_endtime_dict = {}
+
+            # iterate through channels
+            for chan_key, gaps_list in self.recording_gaps[station].iteritems():
+                # iterate through gaps list
+                gaps_no = len(gaps_list)
+                for _j, gap_entry in enumerate(gaps_list):
+                    if _j == 0:
+                        # first interval
+                        # print(UTCDateTime(rec_start).ctime(), UTCDateTime(gap_entry['gap_start']).ctime())
+                        self.recording_intervals[station][chan_key].append({'rec_start': rec_start,
+                                                                            'rec_end': gap_entry['gap_start']})
+
+                    elif _j == gaps_no - 1:
+                        # last interval
+                        # print(UTCDateTime(gap_entry['gap_end']).ctime(), UTCDateTime(rec_end).ctime())
+                        self.recording_intervals[station][chan_key].append({'rec_start': gap_entry['gap_end'],
+                                                                            'rec_end': rec_end})
+
+                    else:
+                        if chan_key in comp_endtime_dict.keys():
+                            prev_endtime = comp_endtime_dict[chan_key]
+                            # print(UTCDateTime(gaps_list[_j-1]['gap_end']).ctime(), UTCDateTime(gap_entry['gap_start']).ctime())
+                            self.recording_intervals[station][chan_key].append({'rec_start': prev_endtime,
+                                                                                'rec_end': gap_entry['gap_start']})
+                    comp_endtime_dict[chan_key] = gap_entry['gap_end']
+
+        print("")
+        print("\nFinished calculating station recording intervals")
+        print("Produced output: ")
+
+    def plot_gaps_overlaps(self):
+        self.data_avail_plot = DataAvailPlot(parent=self, sta_list=self.station_list,
+                                             chan_list=self.channel_codes,
+                                             rec_int_dict=self.recording_intervals)
 
 
 if __name__ == '__main__':

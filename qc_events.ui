@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>1217</width>
-    <height>575</height>
+    <width>1227</width>
+    <height>616</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -26,9 +26,9 @@
       <item row="0" column="0">
        <layout class="QHBoxLayout" name="horizontalLayout">
         <item>
-         <widget class="QPushButton" name="open_SQL_button">
+         <widget class="QPushButton" name="open_db_button">
           <property name="text">
-           <string>Open SQL file for Network</string>
+           <string>Open Database file for Network</string>
           </property>
          </widget>
         </item>
@@ -55,14 +55,14 @@
           <item row="0" column="0">
            <widget class="QTreeWidget" name="station_view">
             <property name="sizePolicy">
-             <sizepolicy hsizetype="Fixed" vsizetype="Expanding">
+             <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
               <horstretch>0</horstretch>
               <verstretch>0</verstretch>
              </sizepolicy>
             </property>
             <property name="maximumSize">
              <size>
-              <width>387</width>
+              <width>500</width>
               <height>16777215</height>
              </size>
             </property>
@@ -111,7 +111,7 @@
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>1217</width>
+     <width>1227</width>
      <height>26</height>
     </rect>
    </property>
@@ -122,6 +122,7 @@
     <addaction name="action_upd_xml_sql"/>
     <addaction name="action_generate_sql"/>
     <addaction name="action_get_gaps_sql"/>
+    <addaction name="action_plot_gaps_overlaps"/>
    </widget>
    <addaction name="menuTools"/>
   </widget>
@@ -139,6 +140,11 @@
   <action name="action_get_gaps_sql">
    <property name="text">
     <string>Get Gap Info frm SQL</string>
+   </property>
+  </action>
+  <action name="action_plot_gaps_overlaps">
+   <property name="text">
+    <string>Plot Gaps/Overlaps</string>
    </property>
   </action>
  </widget>
