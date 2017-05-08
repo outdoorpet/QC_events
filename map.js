@@ -36,7 +36,7 @@ var ref_stations = {};
 function addRefStation(station_id, latitude, longitude) {
     var marker = L.marker([latitude, longitude], {
         icon: passiveRefIcon
-    }).bindPopup(station_id).on("click", stationClick);
+    }).bindPopup(station_id).on("click", stationRefClick);
 
 
     marker.status = "--";
@@ -210,6 +210,12 @@ function highlightStation(station_id) {
     setStnMarkerActive(value)
 }
 
+function highlightRefStation(station_id) {
+    setStnAllInactive();
+    var value = ref_stations[station_id];
+    setStnMarkerActive(value)
+}
+
 //function stationClick(e) {
 //        var clickedStn = e.target;
 //
@@ -224,5 +230,16 @@ if(typeof MainWindow != 'undefined') {
     highlightStation(clickedStn.myCustomStationID)
     clickedStn.bindPopup(clickedStn.myCustomStationID).openPopup();
     MainWindow.onMap_stn_marker_selected(clickedStn.myCustomStationID)
+    }
+}
+
+if(typeof MainWindow != 'undefined') {
+    function stationRefClick(e) {
+        var clickedStn = e.target;
+
+    highlightStation(clickedStn.myCustomStationID)
+    clickedStn.bindPopup(clickedStn.myCustomStationID).openPopup();
+    highlightRefStation(clickedStn.myCustomStationID)
+//    MainWindow.onMap_stn_marker_selected(clickedStn.myCustomStationID)
     }
 }
