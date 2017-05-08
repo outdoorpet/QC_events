@@ -1,5 +1,6 @@
 from PyQt4 import QtCore, QtGui, QtWebKit, QtNetwork, uic
 from obspy import read_inventory, read_events, UTCDateTime, Stream, read
+from obspy.clients.fdsn.client import Client
 import functools
 import os
 import shutil
@@ -608,11 +609,19 @@ class MainWindow(QtGui.QMainWindow, Ui_MainWindow):
 
     def plot_inv(self):
         # plot the stations
+        temp_x_coords = []
+        temp_y_coords = []
         for i, station in enumerate(self.inv[0]):
+            # append the lats and lons to temp lists
+            temp_x_coords.append(station.longitude)
+            temp_y_coords.append(station.latitude)
+
             js_call = "addStation('{station_id}', {latitude}, {longitude});" \
                 .format(station_id=station.code, latitude=station.latitude,
                         longitude=station.longitude)
             self.web_view.page().mainFrame().evaluateJavaScript(js_call)
+
+        self.station_coords = (temp_x_coords, temp_y_coords)
 
     def create_SG2K_initiate(self, event, quake_df):
 
@@ -698,6 +707,60 @@ class MainWindow(QtGui.QMainWindow, Ui_MainWindow):
 
             else:
                 print("No Data for Earthquake!")
+
+
+            # Now requesting reference station data from IRIS if desired
+            if self.ref_radioButton.ischecked():
+                ref_dir = os.path.join(temp_seed_out, 'ref_data')
+
+                # create ref directory
+                if os.path.exists(ref_dir):
+                    shutil.rmtree(ref_dir)
+                os.mkdir(ref_dir)
+
+                # request stations that are close to the selected stations
+
+                # first use the coords lists to get a bounding box for array
+                def calc_bounding_box(x, y):
+                    min_x, max_x = (min(x), max(x))
+                    min_y, max_y = (min(y), max(y))
+
+                    return (min_x, max_x, min_y, max_y)
+
+                bb = calc_bounding_box(self.station_coords[0], self.station_coords[1])
+
+                # request data for near earthquake time up to 5 degrees from bounding box of array
+                client = Client("IRIS")
+                self.ref_inv = client.get_stations(starttime=UTCDateTime(quake_df['qtime'] - (5 * 60)),
+                                                   endtime=UTCDateTime(quake_df['qtime'] + (15 * 60)),
+                                                   minlongitude=bb[0],
+                                                   maxlongitude=bb[1],
+                                                   minlatitude=bb[2],
+                                                   maxlatitude=bb[3],
+                                                   level='channel')
+
+                print(self.ref_inv)
+
+                ref_st = Stream()
+
+                # go through inventory and request timeseries data
+                for net in self.ref_inv:
+                    for stn in net:
+                        ref_st += client.get_waveforms(network=net.code, station=stn.code, channel='*', location='*',
+                                                   starttime=UTCDateTime(quake_df['qtime'] - (5 * 60)),
+                                                   endtime=UTCDateTime(quake_df['qtime'] + (15 * 60)))
+
+
+                try:
+                    # write ref traces into temporary directory
+                    for tr in ref_st:
+                        tr.write(os.path.join(ref_dir, tr.id + ".MSEED"), format="MSEED")
+                    print("Wrote Temporary Reference MiniSEED data to: " + ref_dir)
+                    print('')
+                except:
+                    print("Something Went Wrong Writing Reference Data!")
+
+                self.ref_inv.write(os.path.join(ref_dir, "ref_metadata.xml", format="STATIONXML"))
 
     def upd_xml_sql(self):
         # Look at the SQL database and create dictionary for start and end dates for each station
