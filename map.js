@@ -18,9 +18,49 @@ var passiveIcon = L.divIcon({
     popupAnchor: L.point(0,-20)
 });
 
+var activeRefIcon = L.divIcon({
+    className: 'svg-marker',
+    html: '<svg xmlns="http://www.w3.org/2000/svg" version="1.1" style="margin: 0 auto; width: 20px; height:20px;"><polygon style="fill:Red; stroke:#666666; stroke-width:2; stroke-opacity:0.5"points="0,0 20,0 10,20"/></svg>',
+    iconSize: L.point(20, 20),
+    iconAnchor: L.point(10, 20),
+    popupAnchor: L.point(0,-20)
+});
+
+var passiveRefIcon = L.divIcon({
+    className: 'svg-marker',
+    html: '<svg xmlns="http://www.w3.org/2000/svg" version="1.1" style="margin: 0 auto; width: 20px; height:20px;"><polygon style="fill:Yellow; stroke:#666666; stroke-width:2; stroke-opacity:0.5"points="0,0 20,0 10,20"/></svg>',
+    iconSize: L.point(20, 20),
+    iconAnchor: L.point(10, 20),
+    popupAnchor: L.point(0,-20)
+});
+
 var events = {};
 
 var stations = {};
+
+var ref_stations = {};
+
+
+function addRefStation(station_id, latitude, longitude) {
+    var marker = L.marker([latitude, longitude], {
+        icon: passiveIcon
+    }).bindPopup(station_id).on("click", stationClick);
+
+
+    marker.status = "--";
+
+    marker.myCustomStationID = station_id;
+
+    marker.addTo(map);
+
+    stations[station_id] = {
+        "marker": marker,
+        "latitude": latitude,
+        "longitude": longitude};
+
+    setStnMarkerInactive(stations[station_id]);
+}
+
 
 function addStation(station_id, latitude, longitude) {
     var marker = L.marker([latitude, longitude], {

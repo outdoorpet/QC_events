@@ -734,10 +734,10 @@ class MainWindow(QtGui.QMainWindow, Ui_MainWindow):
                 self.ref_inv = client.get_stations(network="AU",
                                                    starttime=UTCDateTime(quake_df['qtime'] - (5 * 60)),
                                                    endtime=UTCDateTime(quake_df['qtime'] + (15 * 60)),
-                                                   minlongitude=bb[0],
-                                                   maxlongitude=bb[1],
-                                                   minlatitude=bb[2],
-                                                   maxlatitude=bb[3],
+                                                   minlongitude=bb[0]-1,
+                                                   maxlongitude=bb[1]+1,
+                                                   minlatitude=bb[2]-1,
+                                                   maxlatitude=bb[3]+1,
                                                    level='channel')
 
                 print(self.ref_inv)
@@ -750,6 +750,15 @@ class MainWindow(QtGui.QMainWindow, Ui_MainWindow):
                         ref_st += client.get_waveforms(network=net.code, station=stn.code, channel='*', location='*',
                                                    starttime=UTCDateTime(quake_df['qtime'] - (5 * 60)),
                                                    endtime=UTCDateTime(quake_df['qtime'] + (15 * 60)))
+
+
+                        # plot the reference stations
+                        js_call = "addRefStation('{station_id}', {latitude}, {longitude});" \
+                            .format(station_id=stn.code, latitude=stn.latitude,
+                                    longitude=stn.longitude)
+                        self.web_view.page().mainFrame().evaluateJavaScript(js_call)
+
+
 
 
                 try:
