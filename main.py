@@ -734,10 +734,10 @@ class MainWindow(QtGui.QMainWindow, Ui_MainWindow):
                 self.ref_inv = client.get_stations(network="AU",
                                                    starttime=UTCDateTime(quake_df['qtime'] - (5 * 60)),
                                                    endtime=UTCDateTime(quake_df['qtime'] + (15 * 60)),
-                                                   minlongitude=bb[0]-1,
-                                                   maxlongitude=bb[1]+1,
-                                                   minlatitude=bb[2]-1,
-                                                   maxlatitude=bb[3]+1,
+                                                   minlongitude=bb[0]-2,
+                                                   maxlongitude=bb[1]+2,
+                                                   minlatitude=bb[2]-2,
+                                                   maxlatitude=bb[3]+2,
                                                    level='channel')
 
                 print(self.ref_inv)
