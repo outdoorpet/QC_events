@@ -56,7 +56,8 @@ function addRefStation(station_id, latitude, longitude) {
     ref_stations[station_id] = {
         "marker": marker,
         "latitude": latitude,
-        "longitude": longitude};
+        "longitude": longitude,
+        "icon_q": "ref"};
 
     setStnMarkerInactive(ref_stations[station_id]);
 }
@@ -77,7 +78,8 @@ function addStation(station_id, latitude, longitude) {
     stations[station_id] = {
         "marker": marker,
         "latitude": latitude,
-        "longitude": longitude};
+        "longitude": longitude,
+        "icon_q": "temp"};
 
     setStnMarkerInactive(stations[station_id]);
 }
@@ -186,7 +188,11 @@ function setStnMarkerActive(value) {
 function setStnMarkerInactive(value) {
     if (value.marker.status != "passive") {
         var pos = map.latLngToLayerPoint(value.marker.getLatLng()).round();
-        value.marker.setIcon(passiveIcon);
+        if (value.icon_q == "ref") {
+        value.marker.setIcon(passiveRefIcon);
+        } else if (value.icon_q == "temp") {
+        value.setIcon(passiveIcon);
+        };
         value.marker.setZIndexOffset(100 - pos.y);
         value.marker.status = "passive";
     }
