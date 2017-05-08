@@ -14,7 +14,6 @@ import pandas as pd
 import numpy as np
 from query_input_yes_no import query_yes_no
 import sys
-from station_tree_widget import StationTreeWidget
 
 from sqlalchemy import create_engine
 from sqlalchemy import and_, or_
