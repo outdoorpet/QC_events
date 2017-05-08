@@ -43,7 +43,7 @@ var ref_stations = {};
 
 function addRefStation(station_id, latitude, longitude) {
     var marker = L.marker([latitude, longitude], {
-        icon: passiveIcon
+        icon: passiveRefIcon
     }).bindPopup(station_id).on("click", stationClick);
 
 
@@ -53,12 +53,12 @@ function addRefStation(station_id, latitude, longitude) {
 
     marker.addTo(map);
 
-    stations[station_id] = {
+    ref_stations[station_id] = {
         "marker": marker,
         "latitude": latitude,
         "longitude": longitude};
 
-    setStnMarkerInactive(stations[station_id]);
+    setStnMarkerInactive(ref_stations[station_id]);
 }
 
 
