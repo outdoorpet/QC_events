@@ -731,7 +731,8 @@ class MainWindow(QtGui.QMainWindow, Ui_MainWindow):
 
                 # request data for near earthquake time up to 5 degrees from bounding box of array
                 client = Client("IRIS")
-                self.ref_inv = client.get_stations(starttime=UTCDateTime(quake_df['qtime'] - (5 * 60)),
+                self.ref_inv = client.get_stations(network="AU",
+                                                   starttime=UTCDateTime(quake_df['qtime'] - (5 * 60)),
                                                    endtime=UTCDateTime(quake_df['qtime'] + (15 * 60)),
                                                    minlongitude=bb[0],
                                                    maxlongitude=bb[1],
@@ -760,7 +761,7 @@ class MainWindow(QtGui.QMainWindow, Ui_MainWindow):
                 except:
                     print("Something Went Wrong Writing Reference Data!")
 
-                self.ref_inv.write(os.path.join(ref_dir, "ref_metadata.xml", format="STATIONXML"))
+                self.ref_inv.write(os.path.join(ref_dir, "ref_metadata.xml"), format="STATIONXML")
 
     def upd_xml_sql(self):
         # Look at the SQL database and create dictionary for start and end dates for each station
