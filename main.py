@@ -710,7 +710,7 @@ class MainWindow(QtGui.QMainWindow, Ui_MainWindow):
 
 
             # Now requesting reference station data from IRIS if desired
-            if self.ref_radioButton.ischecked():
+            if self.ref_radioButton.isChecked():
                 ref_dir = os.path.join(temp_seed_out, 'ref_data')
 
                 # create ref directory
