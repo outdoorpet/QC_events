@@ -48,7 +48,7 @@ class selectionDialog(QtGui.QDialog):
         QtGui.QDialog.__init__(self, parent)
         self.selui = Ui_SelectDialog()
         self.selui.setupUi(self)
-        self.setWindowTitle('Selection Dialog')
+        # self.setWindowTitle('Selection Dialog')
 
         # Set all check box to checked
         # self.selui.check_all.setChecked(True)
