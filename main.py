@@ -1,6 +1,7 @@
 from PyQt4 import QtCore, QtGui, QtWebKit, QtNetwork, uic
 from obspy import read_inventory, read_events, UTCDateTime, Stream, read
 from obspy.clients.fdsn.client import Client
+from obspy.clients.fdsn.header import FDSNException
 import functools
 import os
 import shutil
@@ -21,6 +22,8 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy import func
 
 from waveforms_db import Waveforms
+
+from collections import defaultdict
 
 # load in Qt Designer UI files
 qc_events_ui = "qc_events.ui"
@@ -640,7 +643,9 @@ class MainWindow(QtGui.QMainWindow, Ui_MainWindow):
             query_time = UTCDateTime(quake_df['qtime'] - (10 * 60)).timestamp
 
             # Create a Stream object to put data into
-            st = Stream()
+            # st = Stream()
+            # Create a dictionary to put traces into (keys are tr_ids)
+            st_dict = defaultdict(list)
 
             print('---------------------------------------')
             print('Finding Data for Earthquake: ' + event)
@@ -661,7 +666,9 @@ class MainWindow(QtGui.QMainWindow, Ui_MainWindow):
                     temp_tr = temp_st[0]
                     temp_tr.stats.network = matched_entry.new_network
 
-                    st.append(temp_tr)
+                    # st.append(temp_tr)
+                    st_dict[temp_tr.get_id()].append(temp_tr)
+
 
             if os.path.splitext(self.db_filename)[1] == ".json":
                 # run python dictionary query
@@ -672,7 +679,7 @@ class MainWindow(QtGui.QMainWindow, Ui_MainWindow):
                             30 * 60))) \
                             and ((matched_entry['station'] in select_sta) and (
                                 matched_entry['component'] in select_comp)):
-                        print(matched_entry['ASDF_tag'])
+                        print(matched_entry['ASDF_tag']) #, os.path.join(matched_entry['path'], key))
 
                         # read in the data to obspy
                         temp_st = read(os.path.join(matched_entry['path'], key))
@@ -681,24 +688,60 @@ class MainWindow(QtGui.QMainWindow, Ui_MainWindow):
                         temp_tr = temp_st[0]
                         temp_tr.stats.network = matched_entry['new_network']
 
-                        st.append(temp_tr)
+                        # st.append(temp_tr)
+                        st_dict[temp_tr.get_id()].append(temp_tr)
 
-            if st.__nonzero__():
+            # free memory
+            temp_st = None
+            temp_tr = None
 
-                # Attempt to merge all traces with matching ID'S in place
-                st.merge()
+            if not len(st_dict) == 0:
+                # .__nonzero__():
+
+                print('')
+                print('Merging Traces from %s Stations....' % len(st_dict))
+                # Attempt to merge all traces with matching ID'S (same keys in dict) in place
+                # st.merge()
+
+                for key in st_dict.keys():
+                    if len(st_dict[key]) > 1:
+                        temp_st = Stream(traces=st_dict[key])
+                        # merge in place
+                        temp_st.merge()
+                        # asign back to dictionary key
+                        st_dict[key] = temp_st
+                    elif len(st_dict[key]) == 1:
+                        st_dict[key] = st_dict[key][0]
+                    else:
+                        # no data for station delete key
+                        del st_dict[key]
+
+                print(st_dict)
+
+
+                print('Trimming Traces to 20 mins around earthquake time....')
 
                 # now trim the st object to 5 mins
                 # before query time and 15 minutes afterwards
                 trace_starttime = UTCDateTime(quake_df['qtime'] - (5 * 60))
                 trace_endtime = UTCDateTime(quake_df['qtime'] + (15 * 60))
 
-                st.trim(starttime=trace_starttime, endtime=trace_endtime, pad=True, fill_value=0)
+                for key in st_dict.keys():
+                    st_dict[key] = st_dict[key].trim(starttime=trace_starttime, endtime=trace_endtime, pad=True, fill_value=0)
+
+                # st.trim(starttime=trace_starttime, endtime=trace_endtime, pad=True, fill_value=0)
+
+                print(st_dict)
 
                 try:
                     # write traces into temporary directory
-                    for tr in st:
-                        tr.write(os.path.join(temp_seed_out, tr.id + ".MSEED"), format="MSEED")
+                    # for tr in st:
+                    for key in st_dict.keys():
+                        if type(st_dict[key]) == Stream:
+                            #there is a problem with network codes (two stations named the same)
+                            #ignore it for now
+                            continue
+                        st_dict[key].write(os.path.join(temp_seed_out, st_dict[key].get_id() + ".MSEED"), format="MSEED")
                     print("Wrote Temporary MiniSEED data to: " + temp_seed_out)
                     print('')
                 except:
@@ -707,6 +750,8 @@ class MainWindow(QtGui.QMainWindow, Ui_MainWindow):
             else:
                 print("No Data for Earthquake!")
 
+            # free memory
+            st_dict = None
 
             # Now requesting reference station data from IRIS if desired
             if self.ref_radioButton.isChecked():
@@ -729,6 +774,8 @@ class MainWindow(QtGui.QMainWindow, Ui_MainWindow):
                 bb = calc_bounding_box(self.station_coords[0], self.station_coords[1])
 
                 # request data for near earthquake time up to 5 degrees from bounding box of array
+                print('\nRequesting Waveform Data from Nearby Permanent Network Stations....')
+
                 client = Client("IRIS")
                 self.ref_inv = client.get_stations(network="AU",
                                                    starttime=UTCDateTime(quake_df['qtime'] - (5 * 60)),
@@ -746,26 +793,26 @@ class MainWindow(QtGui.QMainWindow, Ui_MainWindow):
                 # go through inventory and request timeseries data
                 for net in self.ref_inv:
                     for stn in net:
-                        ref_st += client.get_waveforms(network=net.code, station=stn.code, channel='*', location='*',
-                                                   starttime=UTCDateTime(quake_df['qtime'] - (5 * 60)),
-                                                   endtime=UTCDateTime(quake_df['qtime'] + (15 * 60)))
+                        try:
+                            ref_st += client.get_waveforms(network=net.code, station=stn.code, channel='*', location='*',
+                                                       starttime=UTCDateTime(quake_df['qtime'] - (5 * 60)),
+                                                       endtime=UTCDateTime(quake_df['qtime'] + (15 * 60)))
+                        except FDSNException:
+                            print('No Data for Earthquake from Reference Station: ' + stn.code)
 
-
-                        # plot the reference stations
-                        js_call = "addRefStation('{station_id}', {latitude}, {longitude});" \
-                            .format(station_id=stn.code, latitude=stn.latitude,
-                                    longitude=stn.longitude)
-                        self.web_view.page().mainFrame().evaluateJavaScript(js_call)
-
-
-
+                        else:
+                            # plot the reference stations
+                            js_call = "addRefStation('{station_id}', {latitude}, {longitude});" \
+                                .format(station_id=stn.code, latitude=stn.latitude,
+                                        longitude=stn.longitude)
+                            self.web_view.page().mainFrame().evaluateJavaScript(js_call)
 
                 try:
                     # write ref traces into temporary directory
                     for tr in ref_st:
                         tr.write(os.path.join(ref_dir, tr.id + ".MSEED"), format="MSEED")
-                    print("Wrote Temporary Reference MiniSEED data to: " + ref_dir)
-                    print('')
+                    print("Wrote Reference MiniSEED data to: " + ref_dir)
+                    print('\nEarthquake Data Query Done!!!')
                 except:
                     print("Something Went Wrong Writing Reference Data!")
 
