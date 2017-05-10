@@ -642,6 +642,9 @@ class MainWindow(QtGui.QMainWindow, Ui_MainWindow):
 
             query_time = UTCDateTime(quake_df['qtime'] - (10 * 60)).timestamp
 
+            trace_starttime = UTCDateTime(quake_df['qtime'] - (5 * 60))
+            trace_endtime = UTCDateTime(quake_df['qtime'] + (15 * 60))
+
             # Create a Stream object to put data into
             # st = Stream()
             # Create a dictionary to put traces into (keys are tr_ids)
@@ -688,6 +691,9 @@ class MainWindow(QtGui.QMainWindow, Ui_MainWindow):
                         temp_tr = temp_st[0]
                         temp_tr.stats.network = matched_entry['new_network']
 
+                        # trim trace to start and endtime
+                        temp_tr.trim(starttime=trace_starttime, endtime=trace_endtime)
+
                         # st.append(temp_tr)
                         st_dict[temp_tr.get_id()].append(temp_tr)
 
@@ -707,31 +713,26 @@ class MainWindow(QtGui.QMainWindow, Ui_MainWindow):
                     if len(st_dict[key]) > 1:
                         temp_st = Stream(traces=st_dict[key])
                         # merge in place
+                        # print('\tMerging %s in Stream:' % temp_st.count())
                         temp_st.merge()
-                        # asign back to dictionary key
-                        st_dict[key] = temp_st
+                        # asign trace back to dictionary key
+                        st_dict[key] = temp_st[0]
                     elif len(st_dict[key]) == 1:
                         st_dict[key] = st_dict[key][0]
                     else:
                         # no data for station delete key
                         del st_dict[key]
 
-                print(st_dict)
-
 
                 print('Trimming Traces to 20 mins around earthquake time....')
 
                 # now trim the st object to 5 mins
                 # before query time and 15 minutes afterwards
-                trace_starttime = UTCDateTime(quake_df['qtime'] - (5 * 60))
-                trace_endtime = UTCDateTime(quake_df['qtime'] + (15 * 60))
 
                 for key in st_dict.keys():
                     st_dict[key] = st_dict[key].trim(starttime=trace_starttime, endtime=trace_endtime, pad=True, fill_value=0)
 
                 # st.trim(starttime=trace_starttime, endtime=trace_endtime, pad=True, fill_value=0)
-
-                print(st_dict)
 
                 try:
                     # write traces into temporary directory
