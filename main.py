@@ -715,21 +715,32 @@ class MainWindow(QtGui.QMainWindow, Ui_MainWindow):
                         # merge in place
                         # print('\tMerging %s in Stream:' % temp_st.count())
                         temp_st.merge()
-                        # asign trace back to dictionary key
-                        st_dict[key] = temp_st[0]
+                        # assign trace back to dictionary key if there is data
+                        if temp_st.__nonzero__():
+                            print("Station {0} has {1} Seconds of data".format(key, temp_st[0].stats.endtime - temp_st[0].stats.starttime))
+                            st_dict[key] = temp_st[0]
+                        elif not temp_st.__nonzero__():
+                            print("No Data for: %s" % key)
+                            # no data for station delete key
+                            del st_dict[key]
+                            continue
                     elif len(st_dict[key]) == 1:
+                        print("Station {0} has {1} Seconds of data".format(key, st_dict[key][0].stats.endtime - st_dict[key][0].stats.starttime))
                         st_dict[key] = st_dict[key][0]
-                    else:
+                    elif len(st_dict[key]) == 0:
                         # no data for station delete key
+                        print("No Data for: %s" % key)
                         del st_dict[key]
 
 
-                print('Trimming Traces to 20 mins around earthquake time....')
+                print('\nTrimming Traces to 20 mins around earthquake time....')
 
                 # now trim the st object to 5 mins
                 # before query time and 15 minutes afterwards
 
+
                 for key in st_dict.keys():
+
                     st_dict[key] = st_dict[key].trim(starttime=trace_starttime, endtime=trace_endtime, pad=True, fill_value=0)
 
                 # st.trim(starttime=trace_starttime, endtime=trace_endtime, pad=True, fill_value=0)
@@ -743,7 +754,7 @@ class MainWindow(QtGui.QMainWindow, Ui_MainWindow):
                             #ignore it for now
                             continue
                         st_dict[key].write(os.path.join(temp_seed_out, st_dict[key].get_id() + ".MSEED"), format="MSEED")
-                    print("Wrote Temporary MiniSEED data to: " + temp_seed_out)
+                    print("\nWrote Temporary MiniSEED data to: " + temp_seed_out)
                     print('')
                 except:
                     print("Something Went Wrong!")
